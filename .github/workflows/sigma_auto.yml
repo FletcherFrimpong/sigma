@@ -1,0 +1,33 @@
+name: Sigma Rule Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      cve_id:
+        description: 'Enter CVE ID'
+        required: true
+        default: 'CVE-2025-49144'
+
+jobs:
+  generate-sigma-rule:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml requests openai
+
+      - name: Run SigmaAgent
+        run: |
+          python scripts/SigmaAgent.py --cve ${{ github.event.inputs.cve_id }} --auto-submit
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
