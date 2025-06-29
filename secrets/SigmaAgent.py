@@ -499,14 +499,15 @@ ORDER BY eventTime DESC
         
         # Add all files to git
         for filename, rule_path in files_to_commit:
-            # Check if the file is already in the correct location relative to the repository root
-            if "sentinel" in filename and "sentinelone" not in filename:
+            # Determine the correct target path based on filename
+            if filename.startswith("sentinel_") and filename.endswith(".kql"):
                 target_path = Path("rules") / "sentinel" / filename
-            elif "crowdstrike" in filename:
+            elif filename.startswith("crowdstrike_") and filename.endswith(".falcon"):
                 target_path = Path("rules") / "crowdstrike" / filename
-            elif "sentinelone" in filename:
+            elif filename.startswith("sentinelone_") and filename.endswith(".sql"):
                 target_path = Path("rules") / "sentinelone" / filename
             else:
+                # Default to main rules directory for Sigma rules
                 target_path = Path("rules") / filename
             
             print(f"📁 Target path: {target_path}")
