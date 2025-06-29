@@ -1,0 +1,19 @@
+# CrowdStrike Falcon Detection for CVE-2025-6835
+# Description: A vulnerability was found in code-projects Library System 1.0. It has been rated as critical. This issue affects some unknown processing of the file /student-issue-book.php. The manipulation of the argument reg leads to sql injection. The attack may be initiated remotely. The exploit has been disclosed to the public and may be used.
+# Author: Kwaw Fletcher Frimpong
+# Date: 2025/06/29
+# Severity: Medium
+# Platform: Windows
+# References: https://code-projects.org/, https://github.com/blueandhack/cve/issues/6, https://vuldb.com/?ctiid.314279
+
+# CrowdStrike Falcon Detection for CVE-2025-6835
+# Description: A vulnerability was found in code-projects Library System 1.0. It has been rated as critical. This issue affects some unknown processing of the file /student-issue-book.php. The manipulation of the argument reg leads to sql injection. The attack may be initiated remotely. The exploit has been disclosed to the public and may be used.
+# Author: Kwaw Fletcher Frimpong
+# Date: 2025/06/29
+
+event_simpleName=ProcessRollup2
+| search "suspicious_process.exe" OR "malicious_activity.exe"
+| eval timestamp=timestamp/1000
+| convert timeformat="%Y-%m-%d %H:%M:%S" ctime(timestamp)
+| table timestamp, ComputerName, FileName, CommandLine, ParentBaseFileName
+| sort -timestamp
