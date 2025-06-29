@@ -1,0 +1,7 @@
+{
+  "sigma_repo_path": "./",
+  "author_name": "Kwaw Fletcher Frimpong",
+  "auto_submit": true,
+  "github_token": "${{ secrets.GITHUB_TOKEN }}",
+  "openai_api_key": "${{ secrets.OPENAI_API_KEY }}"
+}
