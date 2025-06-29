@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 🚀 Sigma Rule Automation Agent
-Author: Open Threat Engineering for Humanity
+Author: Kwaw Fletcher Frimpong
 Purpose: Automates the creation, enhancement, validation, and PR submission of Sigma detection rules based on CVEs.
 """
 
