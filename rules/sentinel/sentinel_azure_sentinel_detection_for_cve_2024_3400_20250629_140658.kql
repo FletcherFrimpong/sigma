@@ -1,0 +1,29 @@
+// Azure Sentinel Detection for CVE-2024-3400
+// Description: A command injection as a result of arbitrary file creation vulnerability in the GlobalProtect feature of Palo Alto Networks PAN-OS software for specific PAN-OS versions and distinct feature configurations may enable an unauthenticated attacker to execute arbitrary code with root privileges on the firewall.
+
+Cloud NGFW, Panorama appliances, and Prisma Access are not impacted by this vulnerability.
+// Author: Kwaw Fletcher Frimpong
+// Date: 2025/06/29
+// Severity: Medium
+// References: https://security.paloaltonetworks.com/CVE-2024-3400, https://unit42.paloaltonetworks.com/cve-2024-3400/, https://www.paloaltonetworks.com/blog/2024/04/more-on-the-pan-os-cve/
+
+// Detection for CVE-2024-3400
+// Description: A command injection as a result of arbitrary file creation vulnerability in the GlobalProtect feature of Palo Alto Networks PAN-OS software for specific PAN-OS versions and distinct feature configurations may enable an unauthenticated attacker to execute arbitrary code with root privileges on the firewall.
+
+Cloud NGFW, Panorama appliances, and Prisma Access are not impacted by this vulnerability.
+// Author: Kwaw Fletcher Frimpong
+// Date: 2025/06/29
+
+let timeframe = 1h;
+let suspicious_processes = dynamic([
+    "cmd.exe", "powershell.exe", "wscript.exe", "cscript.exe", "rundll32.exe",
+    "regsvr32.exe", "mshta.exe", "certutil.exe", "bitsadmin.exe", "wmic.exe"
+]);
+
+Sysmon
+| where TimeGenerated >= ago(timeframe)
+| where EventID == 1
+| where Process in~ (suspicious_processes)
+| where CommandLine contains "suspicious" or CommandLine contains "malicious"
+| project TimeGenerated, Computer, Process, CommandLine, ParentProcess, ParentCommandLine
+| order by TimeGenerated desc
