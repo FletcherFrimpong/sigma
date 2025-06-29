@@ -4,19 +4,87 @@ on:
   workflow_dispatch:
     inputs:
       cve_id:
-        description: 'Enter CVE ID'
+        description: 'Enter CVE ID (leave empty for auto-monitoring)'
+        required: false
+        default: ''
+      mode:
+        description: 'Operation mode'
         required: true
-        default: 'CVE-2025-49144'
+        default: 'single'
+        type: choice
+        options:
+          - single
+          - monitor
+          - generate
+          - stats
+  schedule:
+    # Run CVE monitoring daily at 6 AM UTC
+    - cron: '0 6 * * *'
 
 jobs:
-  generate-sigma-rule:
+  cve-monitoring:
     runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'single')
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch all history for better branch management
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml requests openai sqlite3
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "SigmaBot"
+          git config --global user.email "sigma-bot@github.com"
+          git config --global core.compression 9
+          git config --global http.postBuffer 524288000
+
+      - name: Run CVE Monitoring
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "monitor" ]; then
+            python cve_monitor.py --monitor --days 7
+          elif [ "${{ github.event.inputs.mode }}" = "generate" ]; then
+            python cve_monitor.py --generate --platform all
+          elif [ "${{ github.event.inputs.mode }}" = "stats" ]; then
+            python cve_monitor.py --stats
+          else
+            # Default daily monitoring
+            python cve_monitor.py --monitor --days 1
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+
+      - name: Commit and Push CVE Monitoring Results
+        if: github.event_name == 'schedule' || github.event.inputs.mode == 'monitor'
+        run: |
+          # Check if there are any changes to commit
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git add generated_rules/ cve_database.db
+            git commit -m "Auto-update: CVE monitoring results $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            git push origin master
+          fi
+
+  generate-single-rule:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'single' && github.event.inputs.cve_id != ''
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -31,23 +99,27 @@ jobs:
         run: |
           git config --global user.name "SigmaBot"
           git config --global user.email "sigma-bot@github.com"
-          # Configure git to handle large files and improve performance
           git config --global core.compression 9
           git config --global http.postBuffer 524288000
 
-      - name: Run SigmaAgent
+      - name: Run SigmaAgent (Single CVE)
         run: |
           python secrets/SigmaAgent.py --cve ${{ github.event.inputs.cve_id }} --auto-submit --config secrets/sigma_config.json
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
 
+  cleanup:
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [cve-monitoring, generate-single-rule]
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Cleanup old branches (optional)
-        if: always()
         run: |
-          # List all branches for debugging
           echo "Current branches:"
           git branch -a
-          
-          # Note: Branch cleanup should be done manually or through a separate workflow
-          # to avoid conflicts with active PRs
+          echo "Cleanup completed - manual branch management recommended"
