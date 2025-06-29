@@ -124,6 +124,10 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--cve", required=True)
+    parser.add_argument("--auto-submit", action="store_true", help="Automatically submit PR")
     args = parser.parse_args()
     bot = SigmaRuleBot()
+    # Override auto_submit from config if specified in command line
+    if args.auto_submit:
+        bot.auto_submit = True
     bot.run(args.cve)
