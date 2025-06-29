@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-CVE Monitor and Detection Rule Generator
-Monitors CVE databases and generates detection rules automatically.
+Enhanced CVE Monitoring and Detection Rule Generation System
+Integrates with unique differentiators for organization-specific analysis
 """
 
 import argparse
@@ -11,345 +11,614 @@ import requests
 import sqlite3
 import os
 from datetime import datetime, timedelta
+import json
+import time
+import openai
 
-def fetch_cves(days_back=1):
-    """
-    Fetch recent CVEs from the NVD API.
-    Returns a list of CVE dictionaries.
-    """
-    logging.info("Fetching recent CVEs from NVD...")
-    end_date = datetime.utcnow()
-    start_date = end_date - timedelta(days=days_back)
-    # Correct ISO-8601 format with milliseconds and 'Z' for UTC
-    date_format = "%Y-%m-%dT%H:%M:%S.%fZ"
-    pub_start = start_date.strftime(date_format)[:-3] + "Z"
-    pub_end = end_date.strftime(date_format)[:-3] + "Z"
-    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-    params = {
-        'pubStartDate': pub_start,
-        'pubEndDate': pub_end,
-        'resultsPerPage': 100
-    }
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        cves = []
-        for vuln in data.get('vulnerabilities', []):
-            cve_data = vuln.get('cve', {})
-            cves.append({
-                'id': cve_data.get('id', ''),
-                'description': cve_data.get('descriptions', [{}])[0].get('value', ''),
-                'published': cve_data.get('published', ''),
-                'lastModified': cve_data.get('lastModified', ''),
-            })
-        logging.info(f"Fetched {len(cves)} CVEs from NVD.")
-        return cves
-    except Exception as e:
-        logging.error(f"Error fetching CVEs from NVD: {e}")
-        return []
+# Import unique differentiators
+try:
+    from unique_differentiators import UniqueDifferentiators
+    UNIQUE_DIFF_AVAILABLE = True
+except ImportError:
+    UNIQUE_DIFF_AVAILABLE = False
+    print("⚠️  Unique differentiators module not available. Install with: pip install openai")
 
-def init_database():
-    """Initialize SQLite database for storing CVEs."""
-    db_path = "cve_database.db"
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cves (
-            id TEXT PRIMARY KEY,
-            description TEXT,
-            published TEXT,
-            last_modified TEXT,
-            processed BOOLEAN DEFAULT FALSE,
-            rule_generated BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+class CVEMonitor:
+    def __init__(self, db_path="cve_database.db"):
+        self.db_path = db_path
+        self.openai_api_key = os.environ.get('OPENAI_API_KEY')
+        self.github_token = os.environ.get('GITHUB_TOKEN')
+        self.setup_logging()
+        self.setup_database()
+        
+        # Initialize unique differentiators if available
+        self.unique_diff = None
+        if UNIQUE_DIFF_AVAILABLE and self.openai_api_key:
+            try:
+                self.unique_diff = UniqueDifferentiators()
+                self.logger.info("✅ Unique differentiators initialized")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize unique differentiators: {e}")
+
+    def setup_logging(self):
+        """Setup logging configuration"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s %(levelname)s %(message)s',
+            handlers=[
+                logging.FileHandler('cve_monitor.log'),
+                logging.StreamHandler()
+            ]
         )
-    ''')
-    conn.commit()
-    conn.close()
-    logging.info("Database initialized successfully.")
+        self.logger = logging.getLogger(__name__)
 
-def cve_exists(cve_id):
-    """Check if a CVE already exists in the database."""
-    conn = sqlite3.connect("cve_database.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM cves WHERE id = ?", (cve_id,))
-    exists = cursor.fetchone() is not None
-    conn.close()
-    return exists
+    def setup_database(self):
+        """Initialize SQLite database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS cves (
+                id TEXT PRIMARY KEY,
+                description TEXT,
+                severity TEXT,
+                published_date TEXT,
+                last_modified_date TEXT,
+                refs TEXT,
+                processed BOOLEAN DEFAULT FALSE,
+                sigma_rule_generated BOOLEAN DEFAULT FALSE,
+                custom_analysis_generated BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        self.logger.info("Database initialized")
 
-def store_cves(cves):
-    """
-    Store CVEs in the SQLite database, avoiding duplicates.
-    Returns the number of new CVEs stored.
-    """
-    if not cves:
-        logging.info("No CVEs to store.")
-        return 0
-    
-    init_database()
-    conn = sqlite3.connect("cve_database.db")
-    cursor = conn.cursor()
-    
-    new_cves = 0
-    for cve in cves:
-        if not cve_exists(cve['id']):
-            cursor.execute('''
-                INSERT INTO cves (id, description, published, last_modified)
-                VALUES (?, ?, ?, ?)
-            ''', (cve['id'], cve['description'], cve['published'], cve['lastModified']))
-            new_cves += 1
-            logging.info(f"Stored new CVE: {cve['id']}")
-    
-    conn.commit()
-    conn.close()
-    logging.info(f"Stored {new_cves} new CVEs in the database.")
-    return new_cves
-
-def get_unprocessed_cves():
-    """Get CVEs that haven't been processed for rule generation."""
-    conn = sqlite3.connect("cve_database.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, description FROM cves WHERE processed = FALSE")
-    cves = cursor.fetchall()
-    conn.close()
-    return [{'id': cve[0], 'description': cve[1]} for cve in cves]
-
-def mark_cve_processed(cve_id):
-    """Mark a CVE as processed."""
-    conn = sqlite3.connect("cve_database.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE cves SET processed = TRUE WHERE id = ?", (cve_id,))
-    conn.commit()
-    conn.close()
-
-def generate_detection_rules():
-    """
-    Generate detection rules for new CVEs for multiple platforms.
-    """
-    logging.info("Generating detection rules for new CVEs...")
-    
-    # Get unprocessed CVEs
-    unprocessed_cves = get_unprocessed_cves()
-    if not unprocessed_cves:
-        logging.info("No unprocessed CVEs found.")
-        return 0
-    
-    logging.info(f"Found {len(unprocessed_cves)} unprocessed CVEs.")
-    
-    # Create output directories for each platform
-    platforms = {
-        'sigma': 'generated_rules/sigma',
-        'crowdstrike': 'generated_rules/crowdstrike', 
-        'sentinelone': 'generated_rules/sentinelone',
-        'sentinel': 'generated_rules/sentinel'
-    }
-    
-    for platform, directory in platforms.items():
-        os.makedirs(directory, exist_ok=True)
-    
-    rules_generated = 0
-    for cve in unprocessed_cves:
+    def fetch_nvd_cves(self, days_back=7):
+        """Fetch CVEs from NVD API"""
+        if not self.openai_api_key:
+            self.logger.error("OpenAI API key not set")
+            return []
+        
+        # Calculate date range
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days_back)
+        
+        # Format dates for NVD API (ISO-8601 with milliseconds and Z)
+        start_str = start_date.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        end_str = end_date.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        
+        url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+        params = {
+            "pubStartDate": start_str,
+            "pubEndDate": end_str,
+            "resultsPerPage": 2000
+        }
+        
         try:
-            logging.info(f"Generating rules for {cve['id']}: {cve['description'][:100]}...")
+            self.logger.info(f"Fetching CVEs from {start_str} to {end_str}")
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
             
-            # Generate Sigma rule
-            sigma_rule = generate_sigma_rule(cve)
-            sigma_filename = f"{platforms['sigma']}/{cve['id']}_detection.yml"
-            with open(sigma_filename, 'w') as f:
-                f.write(sigma_rule)
+            data = response.json()
+            cves = data.get('vulnerabilities', [])
             
-            # Generate CrowdStrike rule
-            crowdstrike_rule = generate_crowdstrike_rule(cve)
-            crowdstrike_filename = f"{platforms['crowdstrike']}/{cve['id']}_detection.falcon"
-            with open(crowdstrike_filename, 'w') as f:
-                f.write(crowdstrike_rule)
+            self.logger.info(f"Fetched {len(cves)} CVEs from NVD")
+            return cves
             
-            # Generate SentinelOne rule
-            sentinelone_rule = generate_sentinelone_rule(cve)
-            sentinelone_filename = f"{platforms['sentinelone']}/{cve['id']}_detection.sql"
-            with open(sentinelone_filename, 'w') as f:
-                f.write(sentinelone_rule)
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Error fetching from NVD: {e}")
+            return []
+
+    def fetch_github_cves(self, days_back=7):
+        """Fetch CVEs from GitHub Security Advisories"""
+        if not self.github_token:
+            self.logger.warning("GitHub token not set, skipping GitHub CVEs")
+            return []
+        
+        # Calculate date range
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days_back)
+        
+        # GitHub GraphQL query for security advisories
+        query = """
+        query($cursor: String) {
+          securityVulnerabilities(first: 100, after: $cursor) {
+            nodes {
+              advisory {
+                id
+                summary
+                severity
+                publishedAt
+                updatedAt
+                references {
+                  url
+                }
+              }
+              vulnerableRequirements
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+        """
+        
+        cves = []
+        cursor = None
+        
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.github_token}",
+                "Content-Type": "application/json"
+            }
             
-            # Generate Sentinel rule
-            sentinel_rule = generate_sentinel_rule(cve)
-            sentinel_filename = f"{platforms['sentinel']}/{cve['id']}_detection.kql"
-            with open(sentinel_filename, 'w') as f:
-                f.write(sentinel_rule)
+            while True:
+                variables = {"cursor": cursor} if cursor else {}
+                
+                response = requests.post(
+                    "https://api.github.com/graphql",
+                    json={"query": query, "variables": variables},
+                    headers=headers,
+                    timeout=30
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                vulnerabilities = data['data']['securityVulnerabilities']['nodes']
+                
+                for vuln in vulnerabilities:
+                    advisory = vuln['advisory']
+                    published_at = datetime.fromisoformat(advisory['publishedAt'].replace('Z', '+00:00'))
+                    
+                    if start_date <= published_at <= end_date:
+                        cve_data = {
+                            'cve': {
+                                'id': advisory['id'],
+                                'descriptions': [{'value': advisory['summary']}],
+                                'metrics': {'cvssMetricV31': [{'cvssData': {'baseSeverity': advisory['severity']}}]},
+                                'references': [{'url': ref['url']} for ref in advisory['references']],
+                                'published': advisory['publishedAt'],
+                                'lastModified': advisory['updatedAt']
+                            }
+                        }
+                        cves.append(cve_data)
+                
+                page_info = data['data']['securityVulnerabilities']['pageInfo']
+                if not page_info['hasNextPage']:
+                    break
+                cursor = page_info['endCursor']
+                
+                # Rate limiting
+                time.sleep(1)
             
-            # Mark as processed
-            mark_cve_processed(cve['id'])
-            rules_generated += 1
-            logging.info(f"Generated rules for {cve['id']}: Sigma, CrowdStrike, SentinelOne, Sentinel")
+            self.logger.info(f"Fetched {len(cves)} CVEs from GitHub")
+            return cves
             
         except Exception as e:
-            logging.error(f"Error generating rules for {cve['id']}: {e}")
-    
-    logging.info(f"Generated {rules_generated} detection rule sets (4 platforms each).")
-    return rules_generated
+            self.logger.error(f"Error fetching from GitHub: {e}")
+            return []
 
-def generate_sigma_rule(cve):
-    """Generate a Sigma detection rule."""
-    return f"""title: Detection for {cve['id']}
-description: Generated detection rule for {cve['id']}
-author: CVE Monitor
-date: {datetime.now().strftime('%Y/%m/%d')}
-logsource:
-    category: process_creation
-    product: windows
-detection:
-    selection:
-        CommandLine|contains: 'suspicious_activity'
-    condition: selection
-level: medium
-tags:
-    - attack.initial_access
-    - cve.{cve['id']}
-"""
+    def store_cves(self, cves):
+        """Store CVEs in database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        stored_count = 0
+        for cve_data in cves:
+            try:
+                cve = cve_data['cve']
+                cve_id = cve['id']
+                
+                # Check if CVE already exists
+                cursor.execute("SELECT id FROM cves WHERE id = ?", (cve_id,))
+                if cursor.fetchone():
+                    continue
+                
+                # Extract description
+                descriptions = cve.get('descriptions', [])
+                description = descriptions[0]['value'] if descriptions else "No description available"
+                
+                # Extract severity
+                metrics = cve.get('metrics', {})
+                cvss_metrics = metrics.get('cvssMetricV31', [])
+                severity = cvss_metrics[0]['cvssData']['baseSeverity'] if cvss_metrics else "UNKNOWN"
+                
+                # Extract references
+                references = cve.get('references', [])
+                ref_urls = [ref['url'] for ref in references]
+                
+                cursor.execute('''
+                    INSERT INTO cves (id, description, severity, published_date, last_modified_date, refs)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    cve_id,
+                    description,
+                    severity,
+                    cve.get('published'),
+                    cve.get('lastModified'),
+                    json.dumps(ref_urls)
+                ))
+                
+                stored_count += 1
+                
+            except Exception as e:
+                self.logger.error(f"Error storing CVE {cve.get('id', 'unknown')}: {e}")
+        
+        conn.commit()
+        conn.close()
+        self.logger.info(f"Stored {stored_count} new CVEs in database")
 
-def generate_crowdstrike_rule(cve):
-    """Generate a CrowdStrike Falcon detection rule."""
-    description_escaped = cve['description'].replace('"', '\\"')
-    return f"""# CrowdStrike Falcon Detection Rule for {cve['id']}
-# Generated by CVE Monitor
-# Date: {datetime.now().strftime('%Y-%m-%d')}
+    def generate_detection_rules(self, cve_id=None, limit=10):
+        """Generate detection rules for CVEs"""
+        if not self.openai_api_key:
+            self.logger.error("OpenAI API key not set")
+            return
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if cve_id:
+            cursor.execute("SELECT * FROM cves WHERE id = ?", (cve_id,))
+            cves = cursor.fetchall()
+        else:
+            cursor.execute("SELECT * FROM cves WHERE sigma_rule_generated = FALSE ORDER BY created_at DESC LIMIT ?", (limit,))
+            cves = cursor.fetchall()
+        
+        conn.close()
+        
+        if not cves:
+            self.logger.info("No CVEs to process")
+            return
+        
+        self.logger.info(f"Generating detection rules for {len(cves)} CVEs")
+        
+        for cve in cves:
+            try:
+                self.generate_single_cve_rules(cve)
+                time.sleep(1)  # Rate limiting
+            except Exception as e:
+                self.logger.error(f"Error generating rules for {cve[0]}: {e}")
 
-event_simpleName=ProcessRollup2
-| eval cve_id="{cve['id']}"
-| eval description="{description_escaped}"
-| where CommandLine="*suspicious_activity*"
-| table ComputerName, UserName, CommandLine, cve_id, description
-"""
+    def generate_single_cve_rules(self, cve):
+        """Generate rules for a single CVE"""
+        cve_id, description, severity, published_date, last_modified_date, refs_json, processed, sigma_generated, custom_analysis_generated, created_at = cve
+        
+        if not self.openai_api_key:
+            return
+        
+        try:
+            client = openai.OpenAI(api_key=self.openai_api_key)
+            
+            # Parse references
+            references = json.loads(refs_json) if refs_json else []
+            
+            # Enhanced prompt with more context
+            prompt = f"""
+            Generate comprehensive detection rules for CVE {cve_id}.
+            
+            CVE Details:
+            - ID: {cve_id}
+            - Description: {description}
+            - Severity: {severity}
+            - Published: {published_date}
+            - References: {', '.join(references)}
+            
+            Generate detection rules in the following formats:
+            1. Sigma rule (YAML format)
+            2. CrowdStrike Falcon query
+            3. SentinelOne query (SQL)
+            4. Azure Sentinel query (KQL)
+            
+            For each platform, provide:
+            - Detection logic based on the CVE description
+            - Relevant event types and fields
+            - Appropriate thresholds and conditions
+            - Tags and metadata
+            
+            Make the rules practical and actionable for security teams.
+            """
+            
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=3000
+            )
+            
+            rules_content = response.choices[0].message.content
+            
+            # Parse and save rules for different platforms
+            self.save_platform_rules(cve_id, rules_content, severity)
+            
+            # Update database
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE cves SET sigma_rule_generated = TRUE WHERE id = ?", (cve_id,))
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Generated detection rules for {cve_id}")
+            
+            # Generate custom analysis if unique differentiators are available
+            if self.unique_diff:
+                try:
+                    self.logger.info(f"Generating custom analysis for {cve_id}")
+                    custom_artifacts = self.unique_diff.run_custom_analysis(
+                        cve_id, 
+                        description, 
+                        references
+                    )
+                    
+                    if custom_artifacts:
+                        # Update database
+                        conn = sqlite3.connect(self.db_path)
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE cves SET custom_analysis_generated = TRUE WHERE id = ?", (cve_id,))
+                        conn.commit()
+                        conn.close()
+                        
+                        self.logger.info(f"Generated custom analysis artifacts for {cve_id}")
+                        
+                except Exception as e:
+                    self.logger.error(f"Error generating custom analysis for {cve_id}: {e}")
+            
+        except Exception as e:
+            self.logger.error(f"Error generating rules for {cve_id}: {e}")
 
-def generate_sentinelone_rule(cve):
-    """Generate a SentinelOne detection rule."""
-    description_escaped = cve['description'].replace("'", "''")
-    return f"""-- SentinelOne Detection Rule for {cve['id']}
--- Generated by CVE Monitor
--- Date: {datetime.now().strftime('%Y-%m-%d')}
+    def save_platform_rules(self, cve_id, rules_content, severity):
+        """Save rules for different platforms"""
+        # Create directories if they don't exist
+        platforms = {
+            'sigma': 'generated_rules/sigma',
+            'crowdstrike': 'generated_rules/crowdstrike',
+            'sentinelone': 'generated_rules/sentinelone',
+            'sentinel': 'generated_rules/sentinel'
+        }
+        
+        for platform, directory in platforms.items():
+            os.makedirs(directory, exist_ok=True)
+        
+        # Extract and save Sigma rule
+        try:
+            sigma_rule = self.extract_sigma_rule(rules_content)
+            if sigma_rule:
+                sigma_file = f"generated_rules/sigma/{cve_id}_detection.yml"
+                with open(sigma_file, 'w') as f:
+                    f.write(sigma_rule)
+                self.logger.info(f"Saved Sigma rule: {sigma_file}")
+        except Exception as e:
+            self.logger.error(f"Error saving Sigma rule for {cve_id}: {e}")
+        
+        # Extract and save CrowdStrike rule
+        try:
+            crowdstrike_rule = self.extract_crowdstrike_rule(rules_content)
+            if crowdstrike_rule:
+                crowdstrike_file = f"generated_rules/crowdstrike/{cve_id}_detection.falcon"
+                with open(crowdstrike_file, 'w') as f:
+                    f.write(crowdstrike_rule)
+                self.logger.info(f"Saved CrowdStrike rule: {crowdstrike_file}")
+        except Exception as e:
+            self.logger.error(f"Error saving CrowdStrike rule for {cve_id}: {e}")
+        
+        # Extract and save SentinelOne rule
+        try:
+            sentinelone_rule = self.extract_sentinelone_rule(rules_content)
+            if sentinelone_rule:
+                sentinelone_file = f"generated_rules/sentinelone/{cve_id}_detection.sql"
+                with open(sentinelone_file, 'w') as f:
+                    f.write(sentinelone_rule)
+                self.logger.info(f"Saved SentinelOne rule: {sentinelone_file}")
+        except Exception as e:
+            self.logger.error(f"Error saving SentinelOne rule for {cve_id}: {e}")
+        
+        # Extract and save Sentinel rule
+        try:
+            sentinel_rule = self.extract_sentinel_rule(rules_content)
+            if sentinel_rule:
+                sentinel_file = f"generated_rules/sentinel/{cve_id}_detection.kql"
+                with open(sentinel_file, 'w') as f:
+                    f.write(sentinel_rule)
+                self.logger.info(f"Saved Sentinel rule: {sentinel_file}")
+        except Exception as e:
+            self.logger.error(f"Error saving Sentinel rule for {cve_id}: {e}")
 
-SELECT 
-    agent_id,
-    agent_name,
-    process_name,
-    process_command_line,
-    process_username,
-    '{cve['id']}' as cve_id,
-    '{description_escaped}' as description
-FROM events 
-WHERE event_type = 'process'
-AND process_command_line LIKE '%suspicious_activity%'
-"""
+    def extract_sigma_rule(self, content):
+        """Extract Sigma rule from AI response"""
+        # Look for YAML content between markdown code blocks
+        import re
+        yaml_pattern = r'```yaml\s*\n(.*?)\n```'
+        match = re.search(yaml_pattern, content, re.DOTALL)
+        if match:
+            return match.group(1)
+        
+        # Fallback: look for YAML-like content
+        lines = content.split('\n')
+        yaml_lines = []
+        in_yaml = False
+        
+        for line in lines:
+            if 'title:' in line or 'id:' in line:
+                in_yaml = True
+            if in_yaml:
+                yaml_lines.append(line)
+            if in_yaml and line.strip() == '':
+                break
+        
+        return '\n'.join(yaml_lines) if yaml_lines else None
 
-def generate_sentinel_rule(cve):
-    """Generate an Azure Sentinel detection rule."""
-    description_escaped = cve['description'].replace('"', '\\"')
-    return f"""// Azure Sentinel Detection Rule for {cve['id']}
-// Generated by CVE Monitor
-// Date: {datetime.now().strftime('%Y-%m-%d')}
+    def extract_crowdstrike_rule(self, content):
+        """Extract CrowdStrike rule from AI response"""
+        # Look for CrowdStrike-specific content
+        lines = content.split('\n')
+        falcon_lines = []
+        in_falcon = False
+        
+        for line in lines:
+            if 'crowdstrike' in line.lower() or 'falcon' in line.lower():
+                in_falcon = True
+            if in_falcon:
+                falcon_lines.append(line)
+            if in_falcon and line.strip() == '':
+                break
+        
+        return '\n'.join(falcon_lines) if falcon_lines else None
 
-SecurityEvent
-| where EventID == 4688
-| where CommandLine contains "suspicious_activity"
-| extend CVE_ID = "{cve['id']}"
-| extend Description = "{description_escaped}"
-| project TimeGenerated, Computer, SubjectUserName, CommandLine, CVE_ID, Description
-"""
+    def extract_sentinelone_rule(self, content):
+        """Extract SentinelOne rule from AI response"""
+        # Look for SQL content
+        import re
+        sql_pattern = r'```sql\s*\n(.*?)\n```'
+        match = re.search(sql_pattern, content, re.DOTALL)
+        if match:
+            return match.group(1)
+        
+        # Fallback: look for SQL-like content
+        lines = content.split('\n')
+        sql_lines = []
+        in_sql = False
+        
+        for line in lines:
+            if 'SELECT' in line.upper() or 'FROM' in line.upper():
+                in_sql = True
+            if in_sql:
+                sql_lines.append(line)
+            if in_sql and line.strip() == '':
+                break
+        
+        return '\n'.join(sql_lines) if sql_lines else None
 
-def show_stats():
-    """
-    Show monitoring statistics from the database.
-    """
-    logging.info("Showing monitoring statistics...")
-    
-    try:
-        conn = sqlite3.connect("cve_database.db")
+    def extract_sentinel_rule(self, content):
+        """Extract Sentinel rule from AI response"""
+        # Look for KQL content
+        import re
+        kql_pattern = r'```kql\s*\n(.*?)\n```'
+        match = re.search(kql_pattern, content, re.DOTALL)
+        if match:
+            return match.group(1)
+        
+        # Fallback: look for KQL-like content
+        lines = content.split('\n')
+        kql_lines = []
+        in_kql = False
+        
+        for line in lines:
+            if 'SecurityEvent' in line or 'Sysmon' in line or 'EventLog' in line:
+                in_kql = True
+            if in_kql:
+                kql_lines.append(line)
+            if in_kql and line.strip() == '':
+                break
+        
+        return '\n'.join(kql_lines) if kql_lines else None
+
+    def get_statistics(self):
+        """Get CVE processing statistics"""
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # Total CVEs
         cursor.execute("SELECT COUNT(*) FROM cves")
         total_cves = cursor.fetchone()[0]
         
-        # Processed CVEs
-        cursor.execute("SELECT COUNT(*) FROM cves WHERE processed = TRUE")
-        processed_cves = cursor.fetchone()[0]
+        # CVEs by severity
+        cursor.execute("SELECT severity, COUNT(*) FROM cves GROUP BY severity")
+        severity_stats = dict(cursor.fetchall())
         
-        # Rules generated
-        cursor.execute("SELECT COUNT(*) FROM cves WHERE rule_generated = TRUE")
+        # Processing status
+        cursor.execute("SELECT COUNT(*) FROM cves WHERE sigma_rule_generated = TRUE")
         rules_generated = cursor.fetchone()[0]
         
-        # Recent CVEs (last 7 days)
-        cursor.execute("""
-            SELECT COUNT(*) FROM cves 
-            WHERE created_at >= datetime('now', '-7 days')
-        """)
-        recent_cves = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM cves WHERE custom_analysis_generated = TRUE")
+        custom_analysis_generated = cursor.fetchone()[0]
         
-        # Latest CVEs
-        cursor.execute("""
-            SELECT id, description, created_at 
-            FROM cves 
-            ORDER BY created_at DESC 
-            LIMIT 5
-        """)
-        latest_cves = cursor.fetchall()
+        # Recent CVEs
+        cursor.execute("SELECT COUNT(*) FROM cves WHERE created_at >= datetime('now', '-7 days')")
+        recent_cves = cursor.fetchone()[0]
         
         conn.close()
         
-        print("\n=== CVE Monitoring Statistics ===")
-        print(f"Total CVEs in database: {total_cves}")
-        print(f"Processed CVEs: {processed_cves}")
-        print(f"Rules generated: {rules_generated}")
-        print(f"Recent CVEs (7 days): {recent_cves}")
+        stats = {
+            'total_cves': total_cves,
+            'severity_distribution': severity_stats,
+            'rules_generated': rules_generated,
+            'custom_analysis_generated': custom_analysis_generated,
+            'recent_cves': recent_cves,
+            'unique_differentiators_available': UNIQUE_DIFF_AVAILABLE
+        }
         
-        if latest_cves:
-            print("\nLatest CVEs:")
-            for cve in latest_cves:
-                print(f"  {cve[0]} - {cve[1][:80]}... ({cve[2]})")
+        return stats
+
+    def run_monitoring(self, days_back=7):
+        """Run complete monitoring process"""
+        self.logger.info("Starting CVE monitoring process")
         
-        print("\n" + "="*40)
+        # Fetch CVEs from multiple sources
+        nvd_cves = self.fetch_nvd_cves(days_back)
+        github_cves = self.fetch_github_cves(days_back)
         
-    except Exception as e:
-        logging.error(f"Error showing statistics: {e}")
-        print("Error: Could not retrieve statistics from database.")
+        # Combine and store CVEs
+        all_cves = nvd_cves + github_cves
+        self.store_cves(all_cves)
+        
+        # Generate detection rules
+        self.generate_detection_rules()
+        
+        # Show statistics
+        stats = self.get_statistics()
+        self.logger.info("Monitoring process completed")
+        self.logger.info(f"Statistics: {stats}")
+
+    def run_daemon(self, interval_hours=24):
+        """Run as a daemon process"""
+        self.logger.info(f"Starting CVE monitoring daemon (interval: {interval_hours} hours)")
+        
+        while True:
+            try:
+                self.run_monitoring()
+                self.logger.info(f"Daemon cycle completed. Sleeping for {interval_hours} hours...")
+                time.sleep(interval_hours * 3600)
+            except KeyboardInterrupt:
+                self.logger.info("Daemon stopped by user")
+                break
+            except Exception as e:
+                self.logger.error(f"Daemon error: {e}")
+                time.sleep(3600)  # Wait 1 hour before retrying
 
 def main():
-    parser = argparse.ArgumentParser(description="CVE Monitor and Detection Rule Generator")
-    parser.add_argument('--monitor', action='store_true', help='Run CVE monitoring')
-    parser.add_argument('--generate-rules', action='store_true', help='Generate detection rules')
-    parser.add_argument('--stats', action='store_true', help='Show statistics')
-    parser.add_argument('--daemon', action='store_true', help='Run as daemon (continuous monitoring)')
-    parser.add_argument('--interval', type=int, default=24, help='Monitoring interval in hours (daemon mode)')
+    parser = argparse.ArgumentParser(description="CVE Monitoring and Detection Rule Generation")
+    parser.add_argument('--mode', choices=['monitor', 'generate', 'stats', 'daemon', 'full'], 
+                       default='full', help='Operation mode')
+    parser.add_argument('--days', type=int, default=7, help='Days back to fetch CVEs')
+    parser.add_argument('--cve-id', help='Specific CVE ID to process')
+    parser.add_argument('--limit', type=int, default=10, help='Limit number of CVEs to process')
+    parser.add_argument('--interval', type=int, default=24, help='Daemon interval in hours')
+    
     args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-
-    # Always initialize the database and tables first
-    init_database()
-
-    if args.stats:
-        show_stats()
-    elif args.generate_rules:
-        generate_detection_rules()
-    elif args.daemon:
-        logging.info(f"Starting daemon mode (interval: {args.interval} hours)")
-        try:
-            while True:
-                cves = fetch_cves()
-                store_cves(cves)
-                generate_detection_rules()
-                logging.info(f"Sleeping for {args.interval} hours...")
-                import time
-                time.sleep(args.interval * 3600)
-        except KeyboardInterrupt:
-            logging.info("Daemon stopped by user.")
-            sys.exit(0)
-    elif args.monitor:
-        cves = fetch_cves()
-        store_cves(cves)
-        generate_detection_rules()
-    else:
-        parser.print_help()
+    
+    monitor = CVEMonitor()
+    
+    if args.mode == 'monitor':
+        monitor.run_monitoring(args.days)
+    elif args.mode == 'generate':
+        if args.cve_id:
+            monitor.generate_detection_rules(cve_id=args.cve_id)
+        else:
+            monitor.generate_detection_rules(limit=args.limit)
+    elif args.mode == 'stats':
+        stats = monitor.get_statistics()
+        print(json.dumps(stats, indent=2))
+    elif args.mode == 'daemon':
+        monitor.run_daemon(args.interval)
+    elif args.mode == 'full':
+        # Run complete process: monitor + generate + stats
+        monitor.run_monitoring(args.days)
+        monitor.generate_detection_rules(limit=args.limit)
+        stats = monitor.get_statistics()
+        print(json.dumps(stats, indent=2))
 
 if __name__ == "__main__":
     main() 

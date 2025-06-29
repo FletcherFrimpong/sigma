@@ -1,0 +1,41 @@
+{
+  "siem": {
+    "type": "generic",
+    "endpoints": {
+      "alerts": "/api/alerts",
+      "rules": "/api/rules",
+      "incidents": "/api/incidents"
+    },
+    "authentication": "api_key"
+  },
+  "crowdstrike": {
+    "type": "falcon",
+    "endpoints": {
+      "detections": "/detects/queries/detects/v1",
+      "indicators": "/indicators/queries/iocs/v1",
+      "incidents": "/incidents/queries/incidents/v1"
+    },
+    "authentication": "oauth2"
+  },
+  "slack": {
+    "type": "notification",
+    "channels": [
+      "#security-alerts",
+      "#incident-response"
+    ],
+    "templates": {
+      "cve_alert": "\ud83d\udea8 New CVE detected: {cve_id} - {description}",
+      "incident_created": "\ud83d\udccb Incident created for {cve_id} - {severity}"
+    }
+  },
+  "email": {
+    "type": "notification",
+    "recipients": [
+      "security@company.com",
+      "it@company.com"
+    ],
+    "templates": {
+      "cve_report": "CVE Report: {cve_id} - {severity} severity"
+    }
+  }
+}
