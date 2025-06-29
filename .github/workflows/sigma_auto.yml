@@ -30,4 +30,4 @@ jobs:
           python scripts/SigmaAgent.py --cve ${{ github.event.inputs.cve_id }} --auto-submit
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{}}
