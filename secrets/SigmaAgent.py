@@ -131,9 +131,21 @@ class SigmaRuleBot:
         print(f"🌿 Creating branch: {branch}")
         subprocess.run(["git", "checkout", "-b", branch])
         
-        # The file should already be in the correct location, no need to move it
-        print(f"📝 Adding file to git: rules/{filename}")
-        subprocess.run(["git", "add", f"rules/{filename}"])
+        # Ensure the file is in the correct location relative to the repository root
+        target_path = Path("rules") / filename
+        print(f"📁 Target path: {target_path}")
+        print(f"📁 Source path: {rule_path}")
+        
+        # Create the rules directory if it doesn't exist
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Copy the file to the correct location
+        shutil.copy2(rule_path, target_path)
+        print(f"📄 File copied to: {target_path}")
+        print(f"📄 File exists: {target_path.exists()}")
+        
+        print(f"📝 Adding file to git: {target_path}")
+        subprocess.run(["git", "add", str(target_path)])
         
         print(f"💬 Committing changes")
         subprocess.run(["git", "commit", "-m", f"new: {filename} - auto-generated rule"])
