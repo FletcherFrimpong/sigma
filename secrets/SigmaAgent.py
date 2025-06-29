@@ -18,8 +18,24 @@ from datetime import datetime
 
 class SigmaRuleBot:
     def __init__(self, config_file="sigma_config.json"):
-        with open(config_file) as f:
-            self.config = json.load(f)
+        # Get the directory where this script is located
+        script_dir = Path(__file__).parent
+        config_path = script_dir / config_file
+        
+        print(f"🔧 Loading config from: {config_path}")
+        print(f"🔧 Current working directory: {Path.cwd()}")
+        
+        try:
+            with open(config_path) as f:
+                self.config = json.load(f)
+            print(f"✅ Config loaded successfully")
+        except FileNotFoundError:
+            print(f"❌ Config file not found: {config_path}")
+            print("Please ensure sigma_config.json exists in the secrets directory.")
+            raise
+        except json.JSONDecodeError as e:
+            print(f"❌ Invalid JSON in config file: {e}")
+            raise
 
         self.repo_path = Path(self.config["sigma_repo_path"])
         self.author = self.config.get("author_name", "SigmaBot")
@@ -27,6 +43,13 @@ class SigmaRuleBot:
         self.github_user = self.config["github_user"]
         self.github_repo = self.config["github_repo"]
         self.auto_submit = self.config.get("auto_submit", False)
+        
+        print(f"📁 Repository path: {self.repo_path}")
+        print(f"👤 Author: {self.author}")
+        print(f"🔑 Token length: {len(self.token) if self.token else 0}")
+        print(f"👤 GitHub user: {self.github_user}")
+        print(f"📦 GitHub repo: {self.github_repo}")
+        print(f"🚀 Auto submit: {self.auto_submit}")
 
     def fetch_cve_metadata(self, cve_id):
         print(f"🔍 Fetching CVE metadata for {cve_id}...")
@@ -74,19 +97,42 @@ class SigmaRuleBot:
     def save_sigma_rule(self, rule):
         safe_title = re.sub(r'[^a-zA-Z0-9]', '_', rule["title"]).lower()
         filename = f"win_{safe_title}_{rule['id'][:8]}.yml"
-        rule_path = self.repo_path / "rules" / filename
+        
+        # Use absolute path for rules directory
+        if self.repo_path.is_absolute():
+            rule_path = self.repo_path / "rules" / filename
+        else:
+            # If relative path, make it absolute from current working directory
+            rule_path = Path.cwd() / self.repo_path / "rules" / filename
+        
+        print(f"📁 Creating directory: {rule_path.parent}")
         rule_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        print(f"💾 Saving rule to: {rule_path}")
         with open(rule_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(rule, f, sort_keys=False, allow_unicode=True)
+        
         print(f"✅ Saved rule at {rule_path}")
+        print(f"📄 File exists: {rule_path.exists()}")
+        print(f"📄 File size: {rule_path.stat().st_size if rule_path.exists() else 'N/A'} bytes")
+        
         return filename, rule_path
 
     def commit_and_push(self, filename, rule_path, branch):
+        print(f"🔄 Switching to repository: {self.repo_path}")
         os.chdir(self.repo_path)
+        
+        print(f"🌿 Creating branch: {branch}")
         subprocess.run(["git", "checkout", "-b", branch])
-        shutil.move(str(rule_path), f"rules/{filename}")
+        
+        # The file should already be in the correct location, no need to move it
+        print(f"📝 Adding file to git: rules/{filename}")
         subprocess.run(["git", "add", f"rules/{filename}"])
+        
+        print(f"💬 Committing changes")
         subprocess.run(["git", "commit", "-m", f"new: {filename} - auto-generated rule"])
+        
+        print(f"🚀 Pushing to remote")
         subprocess.run(["git", "push", "origin", branch])
 
     def create_pull_request(self, branch, title, body):

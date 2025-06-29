@@ -25,6 +25,11 @@ jobs:
         run: |
           pip install pyyaml requests openai
 
+      - name: Configure Git
+        run: |
+          git config --global user.name "SigmaBot"
+          git config --global user.email "sigma-bot@github.com"
+
       - name: Run SigmaAgent
         run: |
           python secrets/SigmaAgent.py --cve ${{ github.event.inputs.cve_id }} --auto-submit --config secrets/sigma_config.json
