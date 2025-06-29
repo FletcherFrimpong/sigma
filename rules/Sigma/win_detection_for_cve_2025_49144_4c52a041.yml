@@ -1,0 +1,35 @@
+title: Detection for CVE-2025-49144
+id: 4c52a041-30b1-4a52-a862-b550784b00c6
+status: experimental
+description: Notepad++ is a free and open-source source code editor. In versions 8.8.1
+  and prior, a privilege escalation vulnerability exists in the Notepad++ v8.8.1 installer
+  that allows unprivileged users to gain SYSTEM-level privileges through insecure
+  executable search paths. An attacker could use social engineering or clickjacking
+  to trick users into downloading both the legitimate installer and a malicious executable
+  to the same directory (typically Downloads folder - which is known as Vulnerable
+  directory). Upon running the installer, the attack executes automatically with SYSTEM
+  privileges. This issue has been fixed and will be released in version 8.8.2.
+references:
+- https://drive.google.com/drive/folders/11yeUSWgqHvt4Bz5jO3ilRRfcpQZ6Gvpn
+- https://github.com/notepad-plus-plus/notepad-plus-plus/commit/f2346ea00d5b4d907ed39d8726b38d77c8198f30
+- https://github.com/notepad-plus-plus/notepad-plus-plus/security/advisories/GHSA-9vx8-v79m-6m24
+author: Kwaw Fletcher Frimpong
+date: 2025/06/29
+tags:
+- cve.cve.2025.49144
+logsource:
+  product: windows
+  service: sysmon
+  category: process_creation
+detection:
+  selection:
+    EventID: 1
+    Image|endswith: \malicious.exe
+  condition: selection
+fields:
+- Image
+- CommandLine
+- ParentImage
+falsepositives:
+- Legitimate testing tools
+level: medium
