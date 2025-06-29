@@ -10,9 +10,10 @@ on:
       mode:
         description: 'Operation mode'
         required: true
-        default: 'single'
+        default: 'full'
         type: choice
         options:
+          - full
           - single
           - monitor
           - generate
@@ -49,31 +50,49 @@ jobs:
           git config --global http.postBuffer 524288000
 
       - name: Run CVE Monitoring
+        id: cve-monitor
         run: |
-          if [ "${{ github.event.inputs.mode }}" = "monitor" ]; then
+          echo "Starting CVE monitoring..."
+          echo "Mode: ${{ github.event.inputs.mode || 'full' }}"
+          
+          if [ "${{ github.event.inputs.mode }}" = "full" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Running FULL CVE operation (monitor + generate + stats)..."
+            echo "Step 1: Monitoring CVEs..."
             python cve_monitor.py --monitor --days 7
-          elif [ "${{ github.event.inputs.mode }}" = "generate" ]; then
+            echo "Step 2: Generating detection rules..."
             python cve_monitor.py --generate --platform all
-          elif [ "${{ github.event.inputs.mode }}" = "stats" ]; then
+            echo "Step 3: Generating statistics..."
             python cve_monitor.py --stats
-          else
-            # Default daily monitoring
-            python cve_monitor.py --monitor --days 1
+            echo "full_complete=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.mode }}" = "monitor" ]; then
+            echo "Running CVE monitoring..."
+            python cve_monitor.py --monitor --days 7
+            echo "monitor_complete=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.mode }}" = "generate" ]; then
+            echo "Generating detection rules..."
+            python cve_monitor.py --generate --platform all
+            echo "generate_complete=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.mode }}" = "stats" ]; then
+            echo "Generating statistics..."
+            python cve_monitor.py --stats
+            echo "stats_complete=true" >> $GITHUB_OUTPUT
           fi
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
 
       - name: Commit and Push CVE Monitoring Results
-        if: github.event_name == 'schedule' || github.event.inputs.mode == 'monitor'
+        if: steps.cve-monitor.outputs.full_complete == 'true' || steps.cve-monitor.outputs.monitor_complete == 'true' || github.event.inputs.mode == 'monitor'
         run: |
           # Check if there are any changes to commit
           if git diff --quiet && git diff --cached --quiet; then
             echo "No changes to commit"
           else
+            echo "Changes detected, committing and pushing..."
             git add generated_rules/ cve_database.db
-            git commit -m "Auto-update: CVE monitoring results $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            git commit -m "Auto-update: CVE ${{ github.event.inputs.mode || 'full' }} operation $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
             git push origin master
+            echo "Successfully committed and pushed changes"
           fi
 
   generate-single-rule:
