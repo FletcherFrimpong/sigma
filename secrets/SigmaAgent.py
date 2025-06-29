@@ -125,8 +125,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cve", required=True)
     parser.add_argument("--auto-submit", action="store_true", help="Automatically submit PR")
+    parser.add_argument("--config", default=None, help="Path to config file (default: sigma_config.json in script directory)")
     args = parser.parse_args()
-    bot = SigmaRuleBot()
+    config_file = args.config if args.config else "sigma_config.json"
+    bot = SigmaRuleBot(config_file=config_file)
     # Override auto_submit from config if specified in command line
     if args.auto_submit:
         bot.auto_submit = True
