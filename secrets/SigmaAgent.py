@@ -18,13 +18,13 @@ from datetime import datetime
 
 class SigmaRuleBot:
     def __init__(self, config_file="sigma_config.json"):
-        # Get the directory where this script is located
-        script_dir = Path(__file__).parent
-        config_path = script_dir / config_file
-        
+        config_path = Path(config_file)
+        if not config_path.is_absolute() and not str(config_path).startswith("." + os.sep):
+            # If not absolute or explicitly relative, join with script dir
+            script_dir = Path(__file__).parent
+            config_path = script_dir / config_path
         print(f"🔧 Loading config from: {config_path}")
         print(f"🔧 Current working directory: {Path.cwd()}")
-        
         try:
             with open(config_path) as f:
                 self.config = json.load(f)
@@ -36,14 +36,12 @@ class SigmaRuleBot:
         except json.JSONDecodeError as e:
             print(f"❌ Invalid JSON in config file: {e}")
             raise
-
         self.repo_path = Path(self.config["sigma_repo_path"])
         self.author = self.config.get("author_name", "SigmaBot")
         self.token = self.config["github_token"]
         self.github_user = self.config["github_user"]
         self.github_repo = self.config["github_repo"]
         self.auto_submit = self.config.get("auto_submit", False)
-        
         print(f"📁 Repository path: {self.repo_path}")
         print(f"👤 Author: {self.author}")
         print(f"🔑 Token length: {len(self.token) if self.token else 0}")
