@@ -131,19 +131,23 @@ class SigmaRuleBot:
         print(f"🌿 Creating branch: {branch}")
         subprocess.run(["git", "checkout", "-b", branch])
         
-        # Ensure the file is in the correct location relative to the repository root
+        # Check if the file is already in the correct location relative to the repository root
         target_path = Path("rules") / filename
         print(f"📁 Target path: {target_path}")
         print(f"📁 Source path: {rule_path}")
         
-        # Create the rules directory if it doesn't exist
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+        # If source and target are the same file, just use the target path
+        if rule_path.resolve() == target_path.resolve():
+            print(f"📄 File already in correct location, using: {target_path}")
+        else:
+            # Create the rules directory if it doesn't exist
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Copy the file to the correct location
+            shutil.copy2(rule_path, target_path)
+            print(f"📄 File copied to: {target_path}")
         
-        # Copy the file to the correct location
-        shutil.copy2(rule_path, target_path)
-        print(f"📄 File copied to: {target_path}")
         print(f"📄 File exists: {target_path.exists()}")
-        
         print(f"📝 Adding file to git: {target_path}")
         subprocess.run(["git", "add", str(target_path)])
         
