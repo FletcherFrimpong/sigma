@@ -372,12 +372,12 @@ ORDER BY eventTime DESC
         safe_title = re.sub(r'[^a-zA-Z0-9]', '_', rule["title"]).lower()
         filename = f"win_{safe_title}_{rule['id'][:8]}.yml"
         
-        # Use absolute path for rules directory
+        # Use absolute path for rules/Sigma directory
         if self.repo_path.is_absolute():
-            rule_path = self.repo_path / "rules" / filename
+            rule_path = self.repo_path / "rules" / "Sigma" / filename
         else:
             # If relative path, make it absolute from current working directory
-            rule_path = Path.cwd() / self.repo_path / "rules" / filename
+            rule_path = Path.cwd() / self.repo_path / "rules" / "Sigma" / filename
         
         print(f"📁 Creating directory: {rule_path.parent}")
         rule_path.parent.mkdir(parents=True, exist_ok=True)
