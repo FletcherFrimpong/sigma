@@ -35,4 +35,4 @@ jobs:
           python secrets/SigmaAgent.py --cve ${{ github.event.inputs.cve_id }} --auto-submit --config secrets/sigma_config.json
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_TOKEN: ${{secrets.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}}
+          GITHUB_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
