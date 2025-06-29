@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for better branch management
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -29,6 +31,9 @@ jobs:
         run: |
           git config --global user.name "SigmaBot"
           git config --global user.email "sigma-bot@github.com"
+          # Configure git to handle large files and improve performance
+          git config --global core.compression 9
+          git config --global http.postBuffer 524288000
 
       - name: Run SigmaAgent
         run: |
@@ -36,3 +41,13 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+
+      - name: Cleanup old branches (optional)
+        if: always()
+        run: |
+          # List all branches for debugging
+          echo "Current branches:"
+          git branch -a
+          
+          # Note: Branch cleanup should be done manually or through a separate workflow
+          # to avoid conflicts with active PRs
