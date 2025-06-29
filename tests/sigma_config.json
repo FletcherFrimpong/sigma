@@ -1,7 +1,7 @@
 {
   "sigma_repo_path": "./",
   "author_name": "Kwaw Fletcher Frimpong",
-  "github_token": "ghp_your_github_token_here",
+  "github_token": "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",
   "github_user": "FletcherFrimpong",
   "github_repo": "sigma",
   "auto_submit": true
