@@ -1,141 +1,72 @@
-# SOC Dashboard
+# Detection Rule Canvas
 
-A standalone Security Operations Center (SOC) Dashboard with React frontend and FastAPI backend for monitoring security alerts and metrics.
+A professional, international-standard platform for generating detection rules for multiple security platforms using AI. Inspired by [detections.ai](https://detections.ai/landing).
 
-## 🚀 Features
+## Features
+- Generate detection rules for Sigma, Azure Sentinel (KQL), CrowdStrike (Falcon), SentinelOne (SQL), Splunk (SPL)
+- AI-powered rule generation (OpenAI integration)
+- Modern, accessible web UI (Streamlit)
+- Secure secret management (.env)
+- Professional API with FastAPI (OpenAPI docs at `/docs`)
+- Download and copy rules easily
+- Internationalization-ready (English, easy to translate)
+- Open source (MIT License)
 
-- **Real-time Alert Monitoring**: View and manage security alerts
-- **Analyst Workload Tracking**: Monitor analyst assignments and workload
-- **RESTful API**: FastAPI backend with comprehensive endpoints
-- **Modern UI**: React-based dashboard with Material-UI components
-- **Multi-platform Support**: Ready for integration with various SIEM systems
-
-## 📋 Prerequisites
-
-- Python 3.8+
-- Node.js 14+
-- npm or yarn
-
-## 🛠️ Installation & Setup
-
-### Backend (FastAPI)
-
-1. **Navigate to backend directory:**
-   ```bash
-   cd backend
-   ```
-
-2. **Install Python dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Start the API server:**
-   ```bash
-   uvicorn main:app --reload --port 8000
-   ```
-
-   The API will be available at: http://localhost:8000
-
-### Frontend (React)
-
-1. **Navigate to frontend directory:**
-   ```bash
-   cd frontend-dashboard
-   ```
-
-2. **Install Node.js dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Start the development server:**
-   ```bash
-   npm start
-   ```
-
-   The dashboard will be available at: http://localhost:3000
-
-## 🔧 Configuration
-
-### Environment Variables
-
-Create a `.env` file in the backend directory:
-
-```env
-OPENAI_API_KEY=your_openai_api_key_here
+## Project Structure
+```
+sigma/
+  backend/
+    main.py
+    requirements.txt
+  frontend/
+    app.py
+    requirements.txt
+  .env.example
+  .gitignore
+  README.md
+  LICENSE
 ```
 
-### API Endpoints
+## Quick Start
 
-The backend provides the following endpoints:
-
-- `GET /dashboard/metrics` - Get dashboard metrics
-- `GET /alerts/risky-signin` - Get risky sign-in alerts
-- `POST /generate` - Generate detection rules
-- `POST /analyze` - Analyze detection rules
-- `POST /extract` - Extract threat intelligence
-
-## 📁 Project Structure
-
-```
-Soc-dashboard/
-├── backend/
-│   ├── main.py              # FastAPI application
-│   └── requirements.txt     # Python dependencies
-├── frontend-dashboard/
-│   ├── src/
-│   │   ├── App.tsx         # Main React component
-│   │   └── ...
-│   ├── package.json        # Node.js dependencies
-│   └── ...
-└── README.md
-```
-
-## 🚀 Development
-
-### Running Both Services
-
-1. **Terminal 1 - Backend:**
-   ```bash
-   cd backend
-   uvicorn main:app --reload --port 8000
+1. **Install dependencies:**
    ```
-
-2. **Terminal 2 - Frontend:**
-   ```bash
-   cd frontend-dashboard
-   npm start
+   pip install -r backend/requirements.txt
+   pip install -r frontend/requirements.txt
    ```
+2. **Set your OpenAI API key:**
+   - Copy `backend/.env.example` to `backend/.env` and fill in your key, or set `OPENAI_API_KEY` in your environment.
+3. **Run the backend:**
+   ```
+   uvicorn backend.main:app --reload
+   ```
+4. **Run the frontend:**
+   ```
+   streamlit run frontend/app.py
+   ```
+5. **Open your browser:**
+   Go to [http://localhost:8501](http://localhost:8501)
 
-### API Documentation
+## Usage
+- Paste or upload threat intelligence
+- Select platforms
+- Click "Generate Detection Rules"
+- Download or copy generated rules
 
-Once the backend is running, visit:
-- **Interactive API docs**: http://localhost:8000/docs
-- **ReDoc documentation**: http://localhost:8000/redoc
+## Contributing
+Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
 
-## 🔗 Integration
+## License
+MIT License. See [LICENSE](LICENSE).
 
-This dashboard is designed to integrate with:
-- SIEM systems (Splunk, ELK Stack, etc.)
-- Security tools and APIs
-- Custom alert sources
+## Security
+- Never commit secrets. Use `.env` for local development.
+- Validate and sanitize all user input.
+- Use HTTPS for API calls in production.
 
-## 🤝 Contributing
+## Internationalization
+- All UI and code comments are in English.
+- Structure UI text for easy translation.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 👨‍💻 Author
-
-**Kwaw Fletcher Frimpong**
-
----
-
-**Note**: This is a standalone version of the SOC Dashboard, separated from the main Sigma rule automation project for independent development and deployment. 
+## Contact
+For questions or support, open an issue or contact the maintainers. 
