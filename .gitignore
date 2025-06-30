@@ -37,27 +37,43 @@ pip-delete-this-directory.txt
 # Unit test / coverage reports
 htmlcov/
 .tox/
+.nox/
 .coverage
 .coverage.*
 .cache
 nosetests.xml
 coverage.xml
-*,cover
+*.cover
 .hypothesis/
+.pytest_cache/
 
-# Translations
-*.mo
-*.pot
+# Jupyter Notebook
+.ipynb_checkpoints
 
-# Django stuff:
-*.log
-local_settings.py
+# pyenv
+.python-version
 
-# Flask stuff:
-instance/
-.webassets-cache
+# pipenv
+Pipfile.lock
 
-# MacOS Finder
+# dotenv
+.env
+.env.*
+
+# mypy
+.mypy_cache/
+.dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# VS Code
+.vscode/
+
+# Streamlit
+.streamlit/
+
+# Mac
 .DS_Store
 
 # Scrapy stuff:
@@ -68,22 +84,6 @@ docs/_build/
 
 # PyBuilder
 target/
-
-# IPython Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# celery beat schedule file
-celerybeat-schedule
-
-# dotenv
-.env
-
-# virtualenv
-venv/
-ENV/
 
 # Spyder project settings
 .spyderproject
