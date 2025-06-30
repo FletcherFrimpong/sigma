@@ -35,7 +35,7 @@ class SigmaRuleBot:
         
         try:
             with open(config_path) as f:
-                self.config = json.load(f)
+            self.config = json.load(f)
             print(f"✅ Config loaded successfully")
         except FileNotFoundError:
             print(f"❌ Config file not found: {config_path}")
