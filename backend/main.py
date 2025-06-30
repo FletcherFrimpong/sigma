@@ -1,14 +1,15 @@
 import os
 import logging
 import json
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from dotenv import load_dotenv
 import openai
 from datetime import datetime
+import uuid
 
 # Load environment variables
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
@@ -35,6 +36,40 @@ app.add_middleware(
 
 HISTORY_FILE = os.path.join(os.path.dirname(__file__), 'rule_history.json')
 
+# In-memory data stores for prototype
+alerts = []
+playbooks = {}
+audit_logs = []
+
+# Models
+class PlaybookStep(BaseModel):
+    id: str
+    description: str
+    checked: bool = False
+    automated: bool = False
+    approval_required: bool = False
+    approved: Optional[bool] = None
+    timestamp: Optional[str] = None
+    analyst: Optional[str] = None
+
+class Alert(BaseModel):
+    id: str
+    type: str
+    status: str
+    assigned_to: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+class PlaybookUpdate(BaseModel):
+    step_id: str
+    checked: bool
+    analyst: str
+
+class ApprovalAction(BaseModel):
+    step_id: str
+    approved: bool
+    analyst: str
+
 class RuleRequest(BaseModel):
     threat_description: str
     platforms: List[str]
@@ -54,6 +89,26 @@ class HistoryRequest(BaseModel):
     rule_id: str
     rule: str
     platform: str
+
+# Helper to generate a sample alert and playbook
+if not alerts:
+    alert_id = str(uuid.uuid4())
+    alerts.append(Alert(
+        id=alert_id,
+        type="Risky Sign-In",
+        status="open",
+        assigned_to=None,
+        created_at=datetime.utcnow().isoformat(),
+        updated_at=datetime.utcnow().isoformat()
+    ))
+    playbooks[alert_id] = [
+        PlaybookStep(id="1", description="Validate alert details", checked=False),
+        PlaybookStep(id="2", description="Check user activity", checked=False),
+        PlaybookStep(id="3", description="Enrich with threat intel", checked=False),
+        PlaybookStep(id="4", description="Contact user for verification", checked=False, automated=True, approval_required=True),
+        PlaybookStep(id="5", description="Containment: Disable account or require password reset", checked=False, automated=True, approval_required=True),
+        PlaybookStep(id="6", description="Document findings", checked=False),
+    ]
 
 @app.post("/generate")
 async def generate_rules(request: RuleRequest):
@@ -77,7 +132,7 @@ async def generate_rules(request: RuleRequest):
                 max_tokens=400,
                 temperature=0.4,
             )
-            rule = response.choices[0].message.content.strip()
+            rule = (response.choices[0].message.content or '').strip()
             # Save to history
             save_rule_to_history(request.threat_description, platform, rule)
         except Exception as e:
@@ -103,7 +158,7 @@ async def extract_threat_intel(file: UploadFile = File(...)):
             max_tokens=400,
             temperature=0.3,
         )
-        summary = response.choices[0].message.content.strip()
+        summary = (response.choices[0].message.content or '').strip()
         return {"summary": summary}
     except Exception as e:
         logger.error(f"Error extracting threat intel: {e}")
@@ -123,7 +178,7 @@ async def analyze_rule(request: AnalyzeRequest):
             max_tokens=400,
             temperature=0.3,
         )
-        analysis = response.choices[0].message.content.strip()
+        analysis = (response.choices[0].message.content or '').strip()
         return {"analysis": analysis}
     except Exception as e:
         logger.error(f"Error analyzing rule: {e}")
@@ -143,7 +198,7 @@ async def mitre_tags(request: MitreRequest):
             max_tokens=200,
             temperature=0.2,
         )
-        tags = response.choices[0].message.content.strip()
+        tags = (response.choices[0].message.content or '').strip()
         return {"mitre_tags": tags}
     except Exception as e:
         logger.error(f"Error suggesting MITRE tags: {e}")
@@ -176,8 +231,71 @@ async def export_rule(rule: str = '', platform: str = 'Sigma'):
         f.write(rule)
     return FileResponse(filepath, filename=filename, media_type='text/plain')
 
+@app.get("/alerts/risky-signin", response_model=List[Alert])
+def get_risky_signin_alerts():
+    return [a for a in alerts if a.type == "Risky Sign-In"]
+
+@app.get("/playbook/risky-signin/{alert_id}", response_model=List[PlaybookStep])
+def get_playbook(alert_id: str):
+    if alert_id not in playbooks:
+        raise HTTPException(status_code=404, detail="Playbook not found")
+    return playbooks[alert_id]
+
+@app.post("/playbook/risky-signin/{alert_id}")
+def update_playbook(alert_id: str, update: PlaybookUpdate):
+    if alert_id not in playbooks:
+        raise HTTPException(status_code=404, detail="Playbook not found")
+    steps = playbooks[alert_id]
+    for step in steps:
+        if step.id == update.step_id:
+            step.checked = update.checked
+            step.timestamp = datetime.utcnow().isoformat()
+            step.analyst = update.analyst
+            break
+    return {"success": True}
+
+@app.post("/playbook/risky-signin/{alert_id}/approve")
+def approve_automated_step(alert_id: str, action: ApprovalAction):
+    if alert_id not in playbooks:
+        raise HTTPException(status_code=404, detail="Playbook not found")
+    steps = playbooks[alert_id]
+    for step in steps:
+        if step.id == action.step_id and step.automated and step.approval_required:
+            step.approved = action.approved
+            step.timestamp = datetime.utcnow().isoformat()
+            step.analyst = action.analyst
+            audit_logs.append({
+                "alert_id": alert_id,
+                "step_id": action.step_id,
+                "approved": action.approved,
+                "analyst": action.analyst,
+                "timestamp": step.timestamp
+            })
+            break
+    return {"success": True}
+
+@app.post("/automation/verify-user")
+def automation_verify_user(alert_id: str = Body(...), step_id: str = Body(...)):
+    # Simulate sending a verification prompt
+    return {"success": True, "message": f"Verification prompt sent for alert {alert_id}, step {step_id}"}
+
+@app.get("/dashboard/metrics")
+def dashboard_metrics():
+    total = len(alerts)
+    open_alerts = len([a for a in alerts if a.status == "open"])
+    in_progress = len([a for a in alerts if a.status == "in_progress"])
+    overdue = 0  # For prototype, not implemented
+    return {
+        "total": total,
+        "open": open_alerts,
+        "in_progress": in_progress,
+        "overdue": overdue
+    }
+
 # --- Helper functions for rule history ---
 def save_rule_to_history(threat_description, platform, rule):
+    threat_description = (threat_description or '').strip()
+    platform = (platform or '').strip()
     rule_id = f"{threat_description}_{platform}"
     history = load_rule_history()
     entry = {

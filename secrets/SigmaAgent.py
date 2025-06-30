@@ -20,26 +20,29 @@ from datetime import datetime
 
 class SigmaRuleBot:
     def __init__(self, config_file="sigma_config.json"):
-        config_path = Path(config_file)
-        
-        # If the path contains directory separators, treat it as relative to current working directory
-        if "/" in str(config_path) or "\\" in str(config_path):
-            config_path = Path.cwd() / config_path
-        elif not config_path.is_absolute() and not str(config_path).startswith("." + os.sep):
-            # If it's just a filename, join with script dir
-            script_dir = Path(__file__).parent
-            config_path = script_dir / config_path
-            
-        print(f"🔧 Loading config from: {config_path}")
+        # Best practice: allow override via env var, else use script-relative path
+        env_config_path = os.environ.get("SIGMA_CONFIG_PATH")
+        if env_config_path:
+            config_path = Path(env_config_path).expanduser().resolve()
+            print(f"🔧 Using config path from SIGMA_CONFIG_PATH: {config_path}")
+        else:
+            # Always resolve relative to script location, not CWD
+            script_dir = Path(__file__).parent.resolve()
+            # If config_file is an absolute path, use as is; else, join with script_dir
+            config_path = Path(config_file)
+            if not config_path.is_absolute():
+                config_path = script_dir / config_path
+            print(f"🔧 Using config path relative to script: {config_path}")
+
         print(f"🔧 Current working directory: {Path.cwd()}")
-        
+
         try:
             with open(config_path) as f:
-            self.config = json.load(f)
+                self.config = json.load(f)
             print(f"✅ Config loaded successfully")
         except FileNotFoundError:
             print(f"❌ Config file not found: {config_path}")
-            print("Please ensure sigma_config.json exists in the secrets directory.")
+            print("Please ensure the config file exists. You can set SIGMA_CONFIG_PATH to override the location.")
             raise
         except json.JSONDecodeError as e:
             print(f"❌ Invalid JSON in config file: {e}")
